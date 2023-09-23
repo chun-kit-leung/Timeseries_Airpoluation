@@ -1,0 +1,762 @@
+---
+title: "AMA4601 mini project"
+author: "Leung Chun Kit(21018713D), Lam Wai Tsun(21019252D)"
+---
+
+# Time series analysis on air pollutants data from Wanshouxigong(Beijing) air-quality monitoring site
+
+Data source: https://archive.ics.uci.edu/ml/datasets/Beijing+Multi-Site+Air-Quality+Data
+
+The data set includes hourly air pollutants data from 12 nationally-controlled air-quality monitoring sites. The air-quality data are from the Beijing Municipal Environmental Monitoring Center. The meteorological data in each air-quality site are matched with the nearest weather station from the China Meteorological Administration. The time period is from March 1st, 2013 to February 28th, 2017. Missing data are denoted as NA.
+
+Attribute Information:
+
+No: row number
+
+year: year of data in this row
+
+month: month of data in this row
+
+day: day of data in this row
+
+hour: hour of data in this row
+
+PM2.5: PM2.5 concentration (ug/m^3)
+
+PM10: PM10 concentration (ug/m^3)
+
+SO2: SO2 concentration (ug/m^3)
+
+NO2: NO2 concentration (ug/m^3)
+
+CO: CO concentration (ug/m^3)
+
+O3: O3 concentration (ug/m^3)
+
+TEMP: temperature (degree Celsius)
+
+PRES: pressure (hPa)
+
+DEWP: dew point temperature (degree Celsius)
+
+RAIN: precipitation (mm)
+
+wd: wind direction
+
+WSPM: wind speed (m/s)
+
+station: name of the air-quality monitoring site
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# loading library
+```{r echo=T, results='hide', error=FALSE,warning=FALSE, message=FALSE}
+
+library(corrplot)
+library(RColorBrewer)
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(seasonal)
+library(forecast)
+library(dplyr)
+library(TSstudio)
+library(xts)
+library(tseries)
+library(ggplot2)
+library(lattice)
+
+
+```
+
+
+```{r}
+data <- read.csv("PRSA_Data_Wanshouxigong_20130301-20170228.csv", header = TRUE)
+```
+
+
+We are going to study the air pollution condition in Beijing, Wanshou xigong.
+
+
+```{r}
+
+attach(data)
+```
+
+## Checking the number of missing value
+```{r}
+sum(is.na(data))
+```
+There are 5146 cells contain missing values.
+
+## fill the missing value
+```{r}
+column_nane_list <- colnames(data)
+
+for (a in column_nane_list){
+  data <-data %>% fill(a,.direction = 'updown')
+}
+
+sum( apply(data,2, function(x) is.na(x)))
+
+```
+We fill the missing values by the previous value.If the previous value is not available, we will fill by the next value.
+
+## aggregate data, group the data by year, month and day
+There are two type of information in the data set. One is the different index of the air pollutants (e.g. PM2.5, PM10, SO2, NO2, CO, O3). And the other type is the weather condition (e.g. TEMP, PRES, DEWP, RAIN, wd, WSPM).
+
+```{r}
+
+grouped_year = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES,DEWP,RAIN,WSPM) ~ data$year, data = data, FUN = mean, na.rm = TRUE)
+
+grouped_month = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES, DEWP,RAIN,WSPM) ~ data$year+ data$month, data = data, FUN = mean, na.rm = TRUE)
+
+grouped_day = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES, DEWP,RAIN,WSPM) ~ data$year+ data$month + data$day, data = data, FUN = mean, na.rm = TRUE)
+
+grouped_year <- grouped_year[
+  order( grouped_year[,1] ),
+]
+
+grouped_month <- grouped_month[
+  order( grouped_month[,1], grouped_month[,2] ),
+]
+
+grouped_day <- grouped_day[
+  order( grouped_day[,1], grouped_day[,2], grouped_day[,3] ),
+]
+
+```
+
+## we first analysis the monthly data
+Plot the linear correlation between diffrent variable 
+```{r}
+
+corr_month <- cor(grouped_month[,-c(1:2)])
+
+corrplot(corr_month, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+
+```
+
+We have found that the air pollutants have high correlation between each other (e.g. PM2.5, PM10, CO, SO2 and NO2 has positive correlation, but O3 has the negativity correlation with other air pollutants.)
+
+And we also have found that the weather conditions also have high correlation with the air pollutants (e.g temperature, precipitation has negativity correlation with air pollutant(PM2.5,PM10, CO, SO2, NO2))
+
+## convert dataframe to timeframe object
+```{r}
+
+grouped_month  <- grouped_month [,-c(1:2)]
+
+ts_by_month <- ts(grouped_month , start = c(2013, 3), frequency = 12)
+```
+
+## variables against time plot 
+```{r}
+
+plot.ts(ts_by_month[,1:6])
+plot.ts(ts_by_month[,7:11])
+
+```
+
+## plot the box plot for variable in the cycle (month)
+```{r}
+
+# cycle(ts_by_month)
+
+boxplot(ts_by_month [,'PM2.5'] ~ cycle(ts_by_month [,'PM2.5']))
+boxplot(ts_by_month [,'PM10'] ~ cycle(ts_by_month [,'PM10']))
+boxplot(ts_by_month [,'SO2'] ~ cycle(ts_by_month [,'SO2']))
+boxplot(ts_by_month [,'NO2'] ~ cycle(ts_by_month [,'NO2']))
+boxplot(ts_by_month [,'CO'] ~ cycle(ts_by_month [,'CO']))
+boxplot(ts_by_month [,'O3'] ~ cycle(ts_by_month [,'O3']))
+boxplot(ts_by_month [,'TEMP'] ~ cycle(ts_by_month [,'TEMP']))
+boxplot(ts_by_month [,'DEWP'] ~ cycle(ts_by_month [,'DEWP']))
+boxplot(ts_by_month [,'PRES'] ~ cycle(ts_by_month [,'PRES']))
+boxplot(ts_by_month [,'RAIN'] ~ cycle(ts_by_month [,'RAIN']))
+boxplot(ts_by_month [,'WSPM'] ~ cycle(ts_by_month [,'WSPM']))
+```
+
+```{r}
+
+```
+
+We can observe the distribution of difference variable among month 
+
+There are periodic pattern among month. 
+
+For example, the PM2.5 concentration is lower and less variate at May to Sept, but higher and more variate at Dec to Feb.
+
+The precipitation is more variate at summer (Especially July).
+
+## Plot the heat map 
+
+```{r}
+
+ts_heatmap(ts_by_month[,'PM2.5'],title = " Heatmap - the PM2.5 concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'PM10'],title = " Heatmap - the PM10 concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'SO2'],title = " Heatmap - the SO2 concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'NO2'],title = " Heatmap - the NO2 concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'CO'],title = " Heatmap - the CO concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'O3'],title = " Heatmap - the O3 concentration in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'TEMP'],title = " Heatmap - the TEMP in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'PRES'],title = " Heatmap - the PRES in Wanshou xigong")
+
+ts_heatmap(ts_by_month[,'RAIN'],title = " Heatmap - the RAIN in Wanshou xigong")
+
+```
+
+The heat maps shows the level of the variable. The darker color means that the level is higher. 
+
+For example, the PM2.5 concentration level is higher in winter than summer.
+The Temperature is higher in summer than winter.
+
+## Weekly Analysis 
+
+```{r}
+
+convert_date_to_weekday <- function(day, month, year){
+  date <- as.POSIXlt(paste(as.character(year) , as.character(month), as.character(day), sep="-"), tz = "UTC")
+  weekday <- weekdays(date)
+  return (weekday)
+}
+  
+```
+
+```{r}
+
+data_weekday <- data
+
+data_weekday$weekday <- mapply(convert_date_to_weekday, data$day, data$month, data$year)
+
+grouped_weekday_year = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES, DEWP,RAIN,WSPM) ~ weekday , data = data_weekday, FUN = mean, na.rm = TRUE)
+
+grouped_weekday_year$weekday <- factor(grouped_weekday_year$weekday, levels = c("Monday", "Tuesday","Wednesday","Thursday", "Friday","Saturday","Sunday"))
+
+
+weekdayorder = c("Monday", "Tuesday","Wednesday","Thursday", "Friday","Saturday","Sunday")
+
+grouped_weekday_year = grouped_weekday_year[order(match(grouped_weekday_year$weekday,weekdayorder)),]
+
+xyplot( PM2.5 ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( PM10 ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( CO ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( NO2 ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( SO2 ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( O3 ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+)
+
+xyplot( TEMP ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+       
+       ylim =c (10,15)
+)
+xyplot( RAIN ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+       ylim =c (0,0.2)
+
+)
+
+xyplot( PRES ~ weekday  ,
+       type="b",
+       
+       data = grouped_weekday_year,
+       auto.key = TRUE,
+       ylim =c (900,1100)
+       
+
+)
+```
+
+
+For the air pollutant, Here are some variations among weekdays.
+For example, Staturday has higher PM2.5, PM10, CO, NO2 concentration.
+
+For the weather conditions, there are not much variation among weekdays.
+(It is normal because the weather should not by affect by the week time )
+
+## Hourly analysis
+```{r}
+
+grouped_hour = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES, DEWP,RAIN,WSPM) ~   hour , data = data, FUN = mean, na.rm = TRUE)
+
+grouped_hour_month = aggregate(cbind(PM2.5,PM10,SO2,NO2,CO,O3,TEMP,PRES, DEWP,RAIN,WSPM) ~   hour + month  , data = data, FUN = mean, na.rm = TRUE)
+
+
+xyplot( PM2.5 ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( PM10 ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( CO ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( NO2 ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( SO2 ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( O3 ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+)
+
+xyplot( TEMP ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+       
+       
+)
+xyplot( RAIN ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+       ylim =c (0,0.2)
+
+)
+
+xyplot( PRES ~ hour  ,
+       type="b",
+       
+       data = grouped_hour,
+       auto.key = TRUE,
+       ylim =c (900,1100)
+       
+
+)
+
+```
+
+The line plot shows that in average, the PM2.5, PM10, CO ,and NO2 has higher concentration level at night, and less concentration level at day time.
+
+The Temperature increased since the sun raise and Fridge the maximum at the noon, then decreasing form afternoon to the night 
+
+# Model fitting
+
+## fit decomposition models (monthly) 
+
+We are going to find the data to two types of decomposition model. One is the additive decomposition. Another is the multiplicative decomposition. First, we will do the additive decomposition.
+```{r}
+
+# additive decomposition
+add_decomp_PM25 <- decompose(ts_by_month[,'PM2.5'], type = 'additive')
+add_decomp<- decompose(ts_by_month, type = 'additive')
+add_decomp_PM25
+
+```
+Time series decomposition reduce as four components(Trend,Cycle,Seasonality ,Remainder).
+
+#
+The trend means that the general direction in which the time series is moving.
+
+#
+The cycle is refers to its tendency to rise and fall at inconsistent frequencies.
+
+#
+The seasonal component refers to data that rises and falls at consistent frequencies.
+
+#
+The remainder is means that it exclude trend, cycle, and seasonal components. It is the random fluctuation that cannot explain.
+```{r}
+plot(add_decomp_PM25)
+```
+In the figure, we can see that the trend overall is declining.The seasonal component reflecting the fundamental changes in the air pollutant(PM2.5) since 2014.
+```{r}
+
+add_decomp
+```
+We can observe the fundamental changes of different air pollutants and weather conditions in 2014 to 2017.
+```{r}
+plot(add_decomp$x[,1:6])
+plot(add_decomp$x[,7:11])
+```
+
+We also check the fundamental changes in the four components(Trend,Cycle,Seasonality ,Remainder) in 2014 to 2017.
+
+#
+For example, in seasonal, we can check that is the fundamental changes similar in different seasons.
+And we found that there are similar pattern in the figure in different period.
+
+#
+Moreover, in the trend, we can check the general direction in the time series in 2014 to 2017. For example, we found that the trend of SO2 shows a remarkable decline since 2014.
+
+```{r}
+
+plot(add_decomp$seasonal[1:60], type = "l")
+
+plot(add_decomp$trend[,1:6])
+plot(add_decomp$trend[,7:11])
+
+plot(add_decomp$random[,1:6])
+plot(add_decomp$random[,7:11])
+
+```
+
+
+## multiplicative decomposition
+Second, we will do the multiplicative decomposition.
+```{r}
+
+multi_decomp_PM25 <- decompose(ts_by_month[,'PM2.5'], type = 'multiplicative')
+multi_decomp <- decompose(ts_by_month, type = 'multiplicative')
+multi_decomp_PM25
+
+
+```
+We simply check the four components 
+
+```{r}
+
+plot(multi_decomp_PM25)
+
+multi_decomp
+```
+Now, we check the fundamental changes of different air pollutants and weather conditions in 2014 to 2017.
+
+```{r}
+plot(multi_decomp$x[,1:6])
+plot(multi_decomp$x[,7:11])
+```
+
+Then we also check the fundamental changes in the four components in different column in 2014 to 2017.
+
+#
+In the trend, we found that the trend of air pollutants(PM2.5, PM10, SO2, NO2, CO) shows a remarkable decline since 2014. And the trend of air pollutants(O3) shows a remarkable ascend since 2014.
+
+```{r}
+
+plot(multi_decomp$seasonal[1:60], type = "l")
+
+plot(multi_decomp$trend[,1:6])
+plot(multi_decomp$trend[,7:11])
+
+plot(multi_decomp$random[,1:6])
+plot(multi_decomp$random[,7:11])
+
+```
+
+We found that the multiplicative decomposition model and additive decomposition model shows similar result.
+
+
+## Moving average smoothing (monthly)
+
+Building Seasonal-Trend decomposition model (STL)
+
+```{r}
+
+STL.PM2.5<- stl( ts_by_month[,'PM2.5'] , t.window = 13, s.window = 'periodic')
+plot(STL.PM2.5)
+
+STL.PM10<- stl( ts_by_month[,'PM10'] , t.window = 13, s.window = 'periodic')
+plot(STL.PM10)
+
+STL.NO2<- stl( ts_by_month[,'NO2'] , t.window = 13, s.window = 'periodic')
+plot(STL.NO2)
+
+STL.SO2<- stl( ts_by_month[,'NO2'] , t.window = 13, s.window = 'periodic')
+plot(STL.SO2)
+
+STL.CO<- stl( ts_by_month[,'CO'] , t.window = 13, s.window = 'periodic')
+plot(STL.CO)
+
+STL.O3<- stl( ts_by_month[,'O3'] , t.window = 13, s.window = 'periodic')
+plot(STL.O3)
+
+STL.TEMP<- stl( ts_by_month[,'TEMP'] , t.window = 13, s.window = 'periodic')
+plot(STL.TEMP)
+
+STL.PRES<- stl( ts_by_month[,'PRES'] , t.window = 13, s.window = 'periodic')
+plot(STL.PRES)
+
+STL.RAIN<- stl( ts_by_month[,'RAIN'] , t.window = 13, s.window = 'periodic')
+plot(STL.RAIN)
+
+```
+
+## Tesk for random / remainder for the STL model using Ljung-Box Test (monthly)
+
+```{r}
+
+auto.arima(remainder(STL.PM2.5),trace = T)
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.PM2.5), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise (PM2.5) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.PM10))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.PM10), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(PM10) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+
+auto.arima(remainder(STL.SO2))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.SO2), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(SO2) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.NO2))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.NO2), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(NO2) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.CO))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.CO), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(CO) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.O3))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.O3), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(O3) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.TEMP))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.TEMP), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(TEMP) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.PRES))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.PRES), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(PRES) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+
+auto.arima(remainder(STL.RAIN))
+
+x <- lapply(1:10, function(i){
+  p <- Box.test(remainder(STL.RAIN), lag = i, type = "Ljung-Box")
+  output <- data.frame(lag = i, p_value = p$p.value)
+ return(output) }) %>% bind_rows
+
+plot(x = x$lag,
+      y = x$p_value, ylim = c(0,1),
+      main = "Series white_noise(RAIN) - Ljung-Box Test",
+      xlab = "Lag", ylab = "P-Value")
+ 
+abline(h = 0.05, col="red", lwd=3, lty=2)
+```
+
+The Ljung Box test test the white noise of the timeseries data.
+
+For most of the variable, the residual of the model of lag 1 (AR1) is white noise, such as PM2.5, PM10, SO2, NO2, CO, O3) and for the other model (> lag 2) there exhibit serial correlation among the residual.
+
+# forcesting for diffrent varible by using ARIMA forecast
+```{r}
+
+
+forecast(STL.PM2.5, h=5, method = 'arima')
+
+STL.PM2.5 %>% forecast(method="arima", h=15) %>%
+   autoplot(ylab = 'PM2.5') + ggtitle('Forecasting')
+
+forecast(STL.PM10, h=5, method = 'arima')
+
+STL.PM10 %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'PM10') + ggtitle('Forecasting')
+
+forecast(STL.SO2, h=5, method = 'arima')
+
+STL.SO2 %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'SO2') + ggtitle('Forecasting')
+
+
+forecast(STL.NO2, h=5, method = 'arima')
+# use other mothed
+
+
+STL.NO2 %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'NO2') + ggtitle('Forecasting')
+
+
+forecast(STL.CO, h=5, method = 'arima')
+
+STL.CO %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'CO') + ggtitle('Forecasting')
+
+
+forecast(STL.O3, h=5, method = 'arima')
+
+STL.O3 %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'O3') + ggtitle('Forecasting')
+ 
+forecast(STL.TEMP, h=5, method = 'arima')
+
+STL.TEMP %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'TEMP') + ggtitle('Forecasting')
+ 
+forecast(STL.PRES, h=5, method = 'arima')
+
+STL.PRES %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'PRES') + ggtitle('Forecasting')
+
+
+forecast(STL.RAIN, h=5, method = 'arima')
+
+STL.RAIN %>% forecast(method="arima", h=5) %>%
+   autoplot(ylab = 'RAIN') + ggtitle('Forecasting')
+
+```
+
+The forecast plot shows the predict value of diffreient variable of the next five months on difference variable.
+
+# Conclusion
+
+We find out that, 
+
+
+The air pollution in Beijing condition are correlated with the weather condition.
+
+
+The air pollution condition will change in different season.
+
+
+For all air pollutant except O3, there will be a higher concentration in winter and lower concentration in summer. 
+
+
+For O3, there will be a higher concentration in winter and lower concentration in summer. 
+Air pollution have pattern among hourly,weekly and monthly.
+
